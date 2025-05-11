@@ -44,7 +44,7 @@ client.on('messageCreate', async (message) => {
         channelId: channel.id,
         guildId: guildId,
         selfMute: true,
-        selfDeaf: true,
+        selfDeaf: false,
         adapterCreator: channel.guild.voiceAdapterCreator,
       });
 
@@ -76,7 +76,7 @@ client.on('messageCreate', async (message) => {
         channelId: foundChannel.id,
         guildId: foundChannel.guild.id,
         selfMute: true,
-        selfDeaf: true,
+        selfDeaf: false,
         adapterCreator: foundChannel.guild.voiceAdapterCreator,
       });
 
