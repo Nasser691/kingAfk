@@ -14,6 +14,11 @@ app.listen(port, () => {
 
 const client = new Client();
 
+let autoCheckEnabled = false;
+let autoCheckInterval = null;
+let lastVoiceChannelId = null;
+let lastGuildId = null;
+
 client.on('ready', async () => {
   console.log(`${client.user.username} is ready!`);
 });
@@ -22,31 +27,23 @@ client.on('messageCreate', async (message) => {
   if (message.author.id !== client.user.id) return;
 
   const content = message.content.toLowerCase();
-  const channelId = process.env.CHANNEL_ID;
-  const guildId = process.env.GUILD_ID;
 
   // !join: يدخل روم من .env
   if (content === '!join') {
-    const connection = getVoiceConnection(guildId);
-    if (connection && connection.state.status !== VoiceConnectionStatus.Disconnected) {
-      message.channel.send('❌ البوت داخل الروم فعليًا!');
-      return;
-    }
-
     try {
-      const channel = await client.channels.fetch(channelId);
-      if (!channel) {
-        message.channel.send('❌ لم يتم العثور على الروم.');
-        return;
-      }
+      const channel = await client.channels.fetch(process.env.CHANNEL_ID);
+      if (!channel) return message.channel.send('❌ لم يتم العثور على الروم.');
 
       joinVoiceChannel({
         channelId: channel.id,
-        guildId: guildId,
+        guildId: channel.guild.id,
         selfMute: true,
         selfDeaf: false,
         adapterCreator: channel.guild.voiceAdapterCreator,
       });
+
+      lastVoiceChannelId = channel.id;
+      lastGuildId = channel.guild.id;
 
       message.channel.send('✅ تم دخول الروم بنجاح');
       console.log('✅ تم دخول الروم');
@@ -80,6 +77,9 @@ client.on('messageCreate', async (message) => {
         adapterCreator: foundChannel.guild.voiceAdapterCreator,
       });
 
+      lastVoiceChannelId = foundChannel.id;
+      lastGuildId = foundChannel.guild.id;
+
       message.channel.send(`✅ أنت الآن في وضع AFK في الروم: ${foundChannel.name}`);
       console.log(`✅ دخل الروم: ${foundChannel.name}`);
     } catch (err) {
@@ -88,13 +88,10 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // !leave: يخرج من الروم
+  // !leave
   if (content === '!leave') {
-    const connection = getVoiceConnection(guildId);
-    if (!connection) {
-      message.channel.send('❌ البوت غير متصل بالروم.');
-      return;
-    }
+    const connection = getVoiceConnection(lastGuildId);
+    if (!connection) return message.channel.send('❌ البوت غير متصل بالروم.');
 
     try {
       connection.destroy();
@@ -104,6 +101,56 @@ client.on('messageCreate', async (message) => {
       console.error('خطأ في الخروج من الروم:', error.message);
       message.channel.send('❌ حدث خطأ أثناء محاولة الخروج.');
     }
+  }
+
+  // !stay
+  if (content === '!stay') {
+    if (autoCheckEnabled) {
+      message.channel.send('🔁 الفحص شغال بالفعل.');
+      return;
+    }
+
+    if (!lastVoiceChannelId || !lastGuildId) {
+      message.channel.send('❌ لم يتم حفظ آخر روم صوتي.');
+      return;
+    }
+
+    autoCheckEnabled = true;
+    message.channel.send('✅ تم تفعيل وضع الحماية من الطرد.');
+
+    autoCheckInterval = setInterval(async () => {
+      try {
+        const guild = await client.guilds.fetch(lastGuildId);
+        const me = await guild.members.fetch(client.user.id);
+
+        if (!me.voice.channel) {
+          console.log('🚨 تم الطرد. إعادة الدخول...');
+          const channel = await client.channels.fetch(lastVoiceChannelId);
+          joinVoiceChannel({
+            channelId: channel.id,
+            guildId: channel.guild.id,
+            selfMute: true,
+            selfDeaf: false,
+            adapterCreator: channel.guild.voiceAdapterCreator,
+          });
+          console.log('✅ عاد إلى الروم.');
+        } else {
+          console.log('✅ لا يزال داخل الروم.');
+        }
+      } catch (err) {
+        console.error('❌ خطأ أثناء الفحص:', err.message);
+      }
+    }, 1000 * 60 * 60); // كل ساعة
+  }
+
+  // !stopstay
+  if (content === '!stopstay') {
+    if (!autoCheckEnabled) return message.channel.send('❌ الفحص غير مفعل.');
+
+    clearInterval(autoCheckInterval);
+    autoCheckEnabled = false;
+    autoCheckInterval = null;
+    message.channel.send('🛑 تم إيقاف الفحص التلقائي.');
   }
 });
 
