@@ -48,7 +48,7 @@ client.on('messageCreate', async (message) => {
       message.channel.send('✅ تم دخول الروم بنجاح');
       console.log('✅ تم دخول الروم');
     } catch (error) {
-      console.error('خطأ في دخول الروم:', error.message);
+      console.error('❌ خطأ في دخول الروم:', error.message);
       message.channel.send('❌ حدث خطأ أثناء محاولة الدخول.');
     }
   }
@@ -98,21 +98,19 @@ client.on('messageCreate', async (message) => {
       message.channel.send('✅ تم الخروج من الروم');
       console.log('✅ تم الخروج من الروم');
     } catch (error) {
-      console.error('خطأ في الخروج من الروم:', error.message);
+      console.error('❌ خطأ في الخروج من الروم:', error.message);
       message.channel.send('❌ حدث خطأ أثناء محاولة الخروج.');
     }
   }
 
-  // !stay
+  // !stay: تفعيل الفحص التلقائي كل ساعة
   if (content === '!stay') {
     if (autoCheckEnabled) {
-      message.channel.send('🔁 الفحص شغال بالفعل.');
-      return;
+      return message.channel.send('🔁 الفحص شغال بالفعل.');
     }
 
     if (!lastVoiceChannelId || !lastGuildId) {
-      message.channel.send('❌ لم يتم حفظ آخر روم صوتي.');
-      return;
+      return message.channel.send('❌ لم يتم حفظ آخر روم صوتي.');
     }
 
     autoCheckEnabled = true;
@@ -123,9 +121,11 @@ client.on('messageCreate', async (message) => {
         const guild = await client.guilds.fetch(lastGuildId);
         const me = await guild.members.fetch(client.user.id);
 
-        if (!me.voice.channel) {
+        // إذا غير متصل بالصوت
+        if (!me.voice || !me.voice.channelId) {
           console.log('🚨 تم الطرد. إعادة الدخول...');
           const channel = await client.channels.fetch(lastVoiceChannelId);
+
           joinVoiceChannel({
             channelId: channel.id,
             guildId: channel.guild.id,
@@ -133,9 +133,10 @@ client.on('messageCreate', async (message) => {
             selfDeaf: false,
             adapterCreator: channel.guild.voiceAdapterCreator,
           });
+
           console.log('✅ عاد إلى الروم.');
         } else {
-          console.log('✅ لا يزال داخل الروم.');
+          console.log(`✅ لا يزال داخل الروم: ${me.voice.channel.name}`);
         }
       } catch (err) {
         console.error('❌ خطأ أثناء الفحص:', err.message);
@@ -143,7 +144,7 @@ client.on('messageCreate', async (message) => {
     }, 1000 * 60 * 60); // كل ساعة
   }
 
-  // !stopstay
+  // !stopstay: إيقاف الفحص التلقائي
   if (content === '!stopstay') {
     if (!autoCheckEnabled) return message.channel.send('❌ الفحص غير مفعل.');
 
