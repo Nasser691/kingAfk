@@ -1,90 +1,108 @@
 require('dotenv').config();
 const { Client } = require('discord.js-selfbot-v13');
-const { joinVoiceChannel } = require('@discordjs/voice');
+const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus } = require('@discordjs/voice');
 const express = require('express');
 const app = express();
 const port = process.env.PORT || 3000;
 
-app.get('/', (req, res) => res.send('Bot is running!'));
-app.listen(port, () => console.log(`Express server running on port ${port}`));
-
-const client = new Client();
-let autoCheckEnabled = false;
-let autoCheckInterval = null;
-let latestVoiceChannelId = null;
-let latestGuildId = null;
-
-client.on('ready', () => {
-  console.log(`${client.user.username} is ready!`);
+app.get('/', (req, res) => {
+  res.send('Bot is running!');
+});
+app.listen(port, () => {
+  console.log(`Express server running on port ${port}`);
 });
 
-// تحديث آخر روم يتم الدخول له (حتى لو سحبوك له)
-client.on('voiceStateUpdate', (oldState, newState) => {
-  if (newState.member.id === client.user.id && newState.channelId) {
-    latestVoiceChannelId = newState.channelId;
-    latestGuildId = newState.guild.id;
-    console.log(`🎧 تم تحديث آخر روم إلى: ${newState.channel?.name}`);
-  }
+const client = new Client();
+
+client.on('ready', async () => {
+  console.log(`${client.user.username} is ready!`);
 });
 
 client.on('messageCreate', async (message) => {
   if (message.author.id !== client.user.id) return;
+
   const content = message.content.toLowerCase();
+  const channelId = process.env.CHANNEL_ID;
+  const guildId = process.env.GUILD_ID;
 
-  // !stay: يبدأ الفحص كل 3 دقائق
-  if (content === '!stay') {
-    if (autoCheckEnabled) return message.channel.send('🔁 الفحص شغال بالفعل.');
-    if (!latestVoiceChannelId || !latestGuildId) return message.channel.send('❌ لم يتم حفظ أي روم صوتي بعد.');
+  // !join: يدخل روم من .env
+  if (content === '!join') {
+    const connection = getVoiceConnection(guildId);
+    if (connection && connection.state.status !== VoiceConnectionStatus.Disconnected) {
+      message.channel.send('❌ البوت داخل الروم فعليًا!');
+      return;
+    }
 
-    autoCheckEnabled = true;
-    message.channel.send('✅ تم تفعيل الحماية من الخروج من الروم.');
-
-    autoCheckInterval = setInterval(async () => {
-      try {
-        const guild = await client.guilds.fetch(latestGuildId);
-        const me = await guild.members.fetch(client.user.id);
-
-        if (!me.voice.channel) {
-          console.log('🚨 تم الخروج من الروم.. جاري الرجوع.');
-          const channel = await client.channels.fetch(latestVoiceChannelId);
-          joinVoiceChannel({
-            channelId: channel.id,
-            guildId: channel.guild.id,
-            selfMute: true,
-            selfDeaf: false,
-            adapterCreator: channel.guild.voiceAdapterCreator,
-          });
-          console.log(`✅ عاد إلى الروم: ${channel.name}`);
-        } else {
-          console.log(`✅ لا يزال داخل الروم: ${me.voice.channel.name}`);
-        }
-      } catch (err) {
-        console.error('❌ خطأ أثناء التحقق:', err.message);
-      }
-    }, 1000 * 60 * 3); // كل 3 دقائق
-  }
-
-  // !stopstay: يوقف الفحص التلقائي
-  if (content === '!stopstay') {
-    if (!autoCheckEnabled) return message.channel.send('❌ الفحص غير مفعل.');
-
-    clearInterval(autoCheckInterval);
-    autoCheckEnabled = false;
-    autoCheckInterval = null;
-    message.channel.send('🛑 تم إيقاف الفحص.');
-  }
-
-  // !leave: يطلع من الروم
-  if (content === '!leave') {
     try {
-      const guild = await client.guilds.fetch(latestGuildId);
-      const me = await guild.members.fetch(client.user.id);
-      if (!me.voice.channel) return message.channel.send('❌ غير متصل بأي روم.');
-      me.voice.disconnect();
-      message.channel.send('✅ تم الخروج من الروم.');
+      const channel = await client.channels.fetch(channelId);
+      if (!channel) {
+        message.channel.send('❌ لم يتم العثور على الروم.');
+        return;
+      }
+
+      joinVoiceChannel({
+        channelId: channel.id,
+        guildId: guildId,
+        selfMute: true,
+        selfDeaf: true,
+        adapterCreator: channel.guild.voiceAdapterCreator,
+      });
+
+      message.channel.send('✅ تم دخول الروم بنجاح');
+      console.log('✅ تم دخول الروم');
+    } catch (error) {
+      console.error('خطأ في دخول الروم:', error.message);
+      message.channel.send('❌ حدث خطأ أثناء محاولة الدخول.');
+    }
+  }
+
+  // !afk: يدخل نفس الروم اللي أنت فيه
+  if (content === '!afk') {
+    try {
+      let foundChannel = null;
+      client.guilds.cache.forEach(guild => {
+        const me = guild.members.cache.get(client.user.id);
+        if (me && me.voice.channel) {
+          foundChannel = me.voice.channel;
+        }
+      });
+
+      if (!foundChannel) {
+        message.channel.send('❌ يجب أن تكون متصلاً بروم صوتي أولاً.');
+        return;
+      }
+
+      joinVoiceChannel({
+        channelId: foundChannel.id,
+        guildId: foundChannel.guild.id,
+        selfMute: true,
+        selfDeaf: true,
+        adapterCreator: foundChannel.guild.voiceAdapterCreator,
+      });
+
+      message.channel.send(`✅ أنت الآن في وضع AFK في الروم: ${foundChannel.name}`);
+      console.log(`✅ دخل الروم: ${foundChannel.name}`);
     } catch (err) {
-      console.error('❌ خطأ أثناء الخروج:', err.message);
-      message.channel.send('❌ حدث خطأ أثناء الخروج.');
+      console.error('❌ خطأ في أمر AFK:', err.message);
+      message.channel.send('❌ حدث خطأ أثناء محاولة تنفيذ أمر AFK.');
+    }
+  }
+
+  // !leave: يخرج من الروم
+  if (content === '!leave') {
+    const connection = getVoiceConnection(guildId);
+    if (!connection) {
+      message.channel.send('❌ البوت غير متصل بالروم.');
+      return;
+    }
+
+    try {
+      connection.destroy();
+      message.channel.send('✅ تم الخروج من الروم');
+      console.log('✅ تم الخروج من الروم');
+    } catch (error) {
+      console.error('خطأ في الخروج من الروم:', error.message);
+      message.channel.send('❌ حدث خطأ أثناء محاولة الخروج.');
     }
   }
 });
